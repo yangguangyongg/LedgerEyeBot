@@ -6,6 +6,7 @@ import time
 from dotenv import load_dotenv
 from utils.notifier import Notifier
 from utils.config import FILTER_THRESHOLDS, MAX_VALUES, MONITOR_SETTINGS, WEIGHTS
+from utils.token_performance_tracker import TokenPerformanceTracker
 from utils.token_filter import TokenFilter
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
@@ -24,9 +25,9 @@ def normalize(value, max_value):
     return min(value / max_value, 1) * 100
 
 
-def calculate_potential_score(token_data):
+def calculate_potential_score(token_data, evaluation=None):
     try:
-        evaluation = token_filter.evaluate_token(token_data)
+        evaluation = evaluation or token_filter.evaluate_token(token_data)
         metrics = evaluation["metrics"]
         volume = token_data.get("volume", {}).get("h24", 0)
         price_change_m5 = token_data.get("priceChange", {}).get("m5", 0)
@@ -161,6 +162,11 @@ class DexScreenerMonitor:
         self.confirmation_window_seconds = MONITOR_SETTINGS["confirmation_window_seconds"]
         self.alert_cooldown_seconds = MONITOR_SETTINGS["alert_cooldown_seconds"]
         self.score_threshold = MONITOR_SETTINGS["boosted_token_threshold_score"]
+        self.performance_tracker = TokenPerformanceTracker(
+            storage_dir=MONITOR_SETTINGS["tracker_storage_dir"],
+            review_windows=MONITOR_SETTINGS["performance_review_windows"],
+            summary_interval_seconds=MONITOR_SETTINGS["summary_interval_seconds"],
+        )
 
     async def process_latest_tokens(self):
         """Monitor newly listed tokens."""
@@ -202,6 +208,14 @@ class DexScreenerMonitor:
                     continue
 
                 evaluation = token_filter.evaluate_token(pool_token_detail)
+                potential_score = calculate_potential_score(pool_token_detail, evaluation)
+                self.performance_tracker.record_evaluation(
+                    pool_token_detail,
+                    evaluation,
+                    potential_score,
+                    self.score_threshold,
+                )
+
                 if not evaluation["passed"]:
                     logging.info(
                         f"Token {token_address} does not meet the filter criteria: {', '.join(evaluation['reasons'])}"
@@ -209,12 +223,16 @@ class DexScreenerMonitor:
                     self.pending_alerts.pop(token_address, None)
                     continue
 
-                potential_score = calculate_potential_score(pool_token_detail)
                 logging.info(f"token_address: {token_address}, Potential score: {potential_score}")
                 if potential_score >= self.score_threshold:
                     await self.process_candidate_alert(pool_token_detail, potential_score, evaluation)
                 else:
                     self.pending_alerts.pop(token_address, None)
+
+            await self.performance_tracker.review_due_tokens(fetch_pool_tokens)
+            summary_table = self.performance_tracker.maybe_update_summary()
+            if summary_table:
+                logging.info("Rejection summary table:\n%s", summary_table)
         except Exception as e:
             logging.error(f"Error processing boosted tokens: {e}")
 

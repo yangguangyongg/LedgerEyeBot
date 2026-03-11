@@ -17,6 +17,13 @@ def env_float(name, default):
         return default
     return float(value)
 
+
+def env_int_list(name, default):
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    return [int(item.strip()) for item in value.split(",") if item.strip()]
+
 MAX_VALUES = {
     "volume_h24": env_float("DEX_MAX_VOLUME_H24", 250000),
     "price_change_m5": env_float("DEX_MAX_PRICE_CHANGE_M5", 12),
@@ -71,4 +78,7 @@ MONITOR_SETTINGS = {
     "min_confirmations": env_int("DEX_ALERT_MIN_CONFIRMATIONS", 2),
     "confirmation_window_seconds": env_int("DEX_ALERT_CONFIRMATION_WINDOW_SECONDS", 900),
     "alert_cooldown_seconds": env_int("DEX_ALERT_COOLDOWN_SECONDS", 21600),
+    "performance_review_windows": env_int_list("DEX_PERFORMANCE_REVIEW_WINDOWS_SECONDS", [900, 3600, 14400]),
+    "summary_interval_seconds": env_int("DEX_SUMMARY_INTERVAL_SECONDS", 1800),
+    "tracker_storage_dir": os.getenv("DEX_TRACKER_STORAGE_DIR", "runtime/dex_tracker"),
 }
